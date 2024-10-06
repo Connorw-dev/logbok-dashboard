@@ -1,4 +1,3 @@
-// src/components/DeviceDetails.js
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import axios from 'axios';
@@ -6,11 +5,12 @@ import { LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip, ResponsiveContai
 import { Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Paper, Checkbox, FormControlLabel, Grid, IconButton, Box, Typography } from '@mui/material';
 import { format } from 'date-fns';
 import { SketchPicker } from 'react-color';
+import { Parser } from 'json2csv'; // Import json2csv for CSV conversion
+import { evaluate } from 'mathjs';
 
 const DeviceDetails = () => {
   const { deviceId } = useParams();
   const [deviceData, setDeviceData] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [colorPickerVisible, setColorPickerVisible] = useState(null);
   const [sensorConfig, setSensorConfig] = useState({
     temperature: { name: 'Temperature', factor: 'x', selected: true, color: '#8884d8' },
@@ -29,11 +29,11 @@ const DeviceDetails = () => {
         const filteredRecords = allRecords.filter(record => record.device_id === deviceId);
         const sortedRecords = filteredRecords.sort((a, b) => new Date(a.received_at) - new Date(b.received_at));
         setDeviceData(sortedRecords);
-        setLoading(false);
+        
       })
       .catch((error) => {
         console.error('Error fetching device records:', error);
-        setLoading(false);
+        
       });
   }, [deviceId]);
 
@@ -80,9 +80,9 @@ const DeviceDetails = () => {
 
   const applyTransform = (value, factor) => {
     try {
-      const x = value;
-      return eval(factor); // Use a math parser for better safety in production
+      return evaluate(factor, { x: value });
     } catch (e) {
+      console.error('Error in expression:', e);
       return value;
     }
   };
@@ -101,6 +101,22 @@ const DeviceDetails = () => {
     return combined;
   });
 
+  // CSV Download Handler
+  const handleDownloadCSV = () => {
+    const csvFields = ['device_id', 'received_at', ...Object.keys(sensorConfig)];
+    const json2csvParser = new Parser({ fields: csvFields });
+    const csv = json2csvParser.parse(deviceData);
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `${deviceId}_sensor_data.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link); // Clean up the link
+  };
+
   return (
     <Box padding={3}>
       <Typography variant="h4" gutterBottom>
@@ -111,6 +127,16 @@ const DeviceDetails = () => {
           Back to Dashboard
         </Button>
       </Link>
+
+      {/* Add Download CSV Button */}
+      <Button
+        variant="outlined"
+        color="secondary"
+        style={{ marginBottom: '20px' }}
+        onClick={handleDownloadCSV}
+      >
+        Download CSV
+      </Button>
 
       {/* Centered Table with Fixed Max Width */}
       <TableContainer
@@ -130,8 +156,8 @@ const DeviceDetails = () => {
             <TableRow>
               <TableCell><Typography variant="h6">Sensor</Typography></TableCell>
               <TableCell><Typography variant="h6">Name</Typography></TableCell>
-              <TableCell><Typography variant="h6">Factor (e.g., x^2 + 3)</Typography></TableCell>
-              <TableCell><Typography variant="h6">Color</Typography></TableCell>
+              <TableCell><Typography variant="h6">Function (e.g., x^2 + 3)</Typography></TableCell>
+              <TableCell><Typography variant="h6">Colour</Typography></TableCell>
               <TableCell><Typography variant="h6">Include in Combined Graph</Typography></TableCell>
             </TableRow>
           </TableHead>
