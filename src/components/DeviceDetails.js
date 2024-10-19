@@ -2,10 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import axios from 'axios';
 import { LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Paper, Checkbox, FormControlLabel, Grid, IconButton, Box, Typography } from '@mui/material';
+import { Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Paper, Checkbox, FormControlLabel, Grid, IconButton, Box, Typography, Menu, MenuItem } from '@mui/material';
 import { format } from 'date-fns';
 import { SketchPicker } from 'react-color';
-import { Parser } from 'json2csv'; // Import json2csv for CSV conversion
+import { Parser } from 'json2csv';
 import { evaluate } from 'mathjs';
 
 const DeviceDetails = () => {
@@ -13,15 +13,18 @@ const DeviceDetails = () => {
   const [deviceData, setDeviceData] = useState([]);
   const [colorPickerVisible, setColorPickerVisible] = useState(null);
   const [sensorConfig, setSensorConfig] = useState({
-    temperature: { name: 'Temperature', factor: 'x', selected: true, color: '#8884d8' },
-    battery: { name: 'Battery', factor: 'x', selected: true, color: '#82ca9d' },
-    sdi12_1: { name: 'SDI12-1', factor: 'x', selected: true, color: '#ff7300' },
-    sdi12_2: { name: 'SDI12-2', factor: 'x', selected: true, color: '#00c49f' },
-    modbus_1: { name: 'Modbus-1', factor: 'x', selected: true, color: '#ffbb28' },
-    modbus_2: { name: 'Modbus-2', factor: 'x', selected: true, color: '#ff8042' },
-    analog_1: { name: 'Analog-1', factor: 'x', selected: true, color: '#0088FE' }
+    temperature: { name: 'Temperature', function: 'x', selected: true, color: '#8884d8' },
+    battery: { name: 'Battery', function: 'x', selected: true, color: '#82ca9d' },
+    sdi12_1: { name: 'SDI12-1', function: 'x', selected: true, color: '#ff7300' },
+    sdi12_2: { name: 'SDI12-2', function: 'x', selected: true, color: '#00c49f' },
+    modbus_1: { name: 'Modbus-1', function: 'x', selected: true, color: '#ffbb28' },
+    modbus_2: { name: 'Modbus-2', function: 'x', selected: true, color: '#ff8042' },
+    analog_1: { name: 'Analog-1', function: 'x', selected: true, color: '#0088FE' }
   });
-
+  
+  // State for the Change Frequency dropdown menu
+  const [anchorEl, setAnchorEl] = useState(null);
+  
   useEffect(() => {
     axios.get('/api/get-sensor-records')
       .then((response) => {
@@ -29,20 +32,18 @@ const DeviceDetails = () => {
         const filteredRecords = allRecords.filter(record => record.device_id === deviceId);
         const sortedRecords = filteredRecords.sort((a, b) => new Date(a.received_at) - new Date(b.received_at));
         setDeviceData(sortedRecords);
-        
       })
       .catch((error) => {
         console.error('Error fetching device records:', error);
-        
       });
   }, [deviceId]);
 
-  const handleFactorChange = (sensor, factor) => {
+  const handleFunctionChange = (sensor, func) => {
     setSensorConfig(prevConfig => ({
       ...prevConfig,
       [sensor]: {
         ...prevConfig[sensor],
-        factor
+        function: func
       }
     }));
   };
@@ -75,12 +76,12 @@ const DeviceDetails = () => {
         color: color.hex
       }
     }));
-    setColorPickerVisible(null);  // Close the color picker after color selection
+    setColorPickerVisible(null);
   };
 
-  const applyTransform = (value, factor) => {
+  const applyTransform = (value, func) => {
     try {
-      return evaluate(factor, { x: value });
+      return evaluate(func, { x: value });
     } catch (e) {
       console.error('Error in expression:', e);
       return value;
@@ -88,20 +89,37 @@ const DeviceDetails = () => {
   };
 
   const formatTime = (timeString) => format(new Date(timeString), 'yyyy-MM-dd HH:mm:ss');
+  const formatXAxis = (tickItem) => {
+    const date = new Date(tickItem);
+    return `${date.getHours()}:${date.getMinutes()}`;
+  };
 
-  const combinedData = deviceData.map(record => {
-    const combined = { ...record };
-    Object.keys(sensorConfig).forEach(sensorKey => {
-      if (sensorConfig[sensorKey].selected) {
-        combined[sensorKey] = applyTransform(record[sensorKey], sensorConfig[sensorKey].factor);
-      } else {
-        combined[sensorKey] = null;
-      }
-    });
-    return combined;
-  });
+  const handleRemoveData = () => {
+    if (window.confirm('Are you sure you want to delete all data for this device?')) {
+      axios.delete(`/api/delete-sensor-record/${deviceId}`)
+        .then(() => alert('Data deleted successfully'))
+        .catch(err => console.error('Failed to delete data:', err));
+    }
+  };
 
-  // CSV Download Handler
+  // Change Frequency dropdown logic
+  const handleOpenMenu = (event) => {
+    setAnchorEl(event.currentTarget);
+  };
+
+  const handleCloseMenu = () => {
+    setAnchorEl(null);
+  };
+
+  const handleFrequencyChange = (frequency) => {
+    if (window.confirm(`Are you sure you want to change the sampling frequency to ${frequency} seconds?`)) {
+      axios.post(`/api/change-frequency`, { deviceId, frequency })
+        .then(() => alert('Frequency updated successfully'))
+        .catch(err => console.error('Failed to change frequency:', err));
+    }
+    setAnchorEl(null);
+  };
+
   const handleDownloadCSV = () => {
     const csvFields = ['device_id', 'received_at', ...Object.keys(sensorConfig)];
     const json2csvParser = new Parser({ fields: csvFields });
@@ -114,43 +132,51 @@ const DeviceDetails = () => {
     link.setAttribute('download', `${deviceId}_sensor_data.csv`);
     document.body.appendChild(link);
     link.click();
-    document.body.removeChild(link); // Clean up the link
+    document.body.removeChild(link);
   };
+
+  const combinedData = deviceData.map(record => {
+    const combined = { ...record };
+    Object.keys(sensorConfig).forEach(sensorKey => {
+      if (sensorConfig[sensorKey].selected) {
+        combined[sensorKey] = applyTransform(record[sensorKey], sensorConfig[sensorKey].function);
+      } else {
+        combined[sensorKey] = null;
+      }
+    });
+    return combined;
+  });
 
   return (
     <Box padding={3}>
       <Typography variant="h4" gutterBottom>
         {deviceId} - Sensor Data
       </Typography>
-      <Link to="/">
-        <Button variant="contained" color="primary" style={{ marginBottom: '20px' }}>
-          Back to Dashboard
+      <Box display="flex" alignItems="center" mb={3}>
+        <Link to="/">
+          <Button variant="contained" color="primary" style={{ marginRight: '10px' }}>
+            Back to Dashboard
+          </Button>
+        </Link>
+        <Button variant="contained" color="secondary" onClick={handleDownloadCSV} style={{ marginRight: '10px' }}>
+          Download CSV
         </Button>
-      </Link>
+        <Button variant="contained" color="error" onClick={handleRemoveData} style={{ marginRight: '10px' }}>
+          Remove Data
+        </Button>
+        
+        {/* Change Frequency Dropdown Menu */}
+        <Button variant="contained" onClick={handleOpenMenu}>
+          Change Frequency
+        </Button>
+        <Menu anchorEl={anchorEl} open={Boolean(anchorEl)} onClose={handleCloseMenu}>
+          <MenuItem onClick={() => handleFrequencyChange(5)}>5 seconds</MenuItem>
+          <MenuItem onClick={() => handleFrequencyChange(30)}>30 seconds</MenuItem>
+          <MenuItem onClick={() => handleFrequencyChange(300)}>5 minutes</MenuItem>
+        </Menu>
+      </Box>
 
-      {/* Add Download CSV Button */}
-      <Button
-        variant="outlined"
-        color="secondary"
-        style={{ marginBottom: '20px' }}
-        onClick={handleDownloadCSV}
-      >
-        Download CSV
-      </Button>
-
-      {/* Centered Table with Fixed Max Width */}
-      <TableContainer
-        component={Paper}
-        style={{
-          marginBottom: '30px',
-          padding: '20px',
-          borderRadius: '8px',
-          maxWidth: '1000px',
-          marginLeft: 'auto',
-          marginRight: 'auto',
-          boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.1)'
-        }}
-      >
+      <TableContainer component={Paper} style={{ marginBottom: '30px', padding: '20px', borderRadius: '8px', maxWidth: '1000px', marginLeft: 'auto', marginRight: 'auto', boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.1)' }}>
         <Table aria-label="sensor table">
           <TableHead>
             <TableRow>
@@ -166,50 +192,21 @@ const DeviceDetails = () => {
               <TableRow key={sensorKey}>
                 <TableCell>{sensorKey.replace('_', '-')}</TableCell>
                 <TableCell>
-                  <TextField
-                    value={sensorConfig[sensorKey].name}
-                    onChange={(e) => handleNameChange(sensorKey, e.target.value)}
-                    label="Name"
-                    variant="outlined"
-                    size="small"
-                    fullWidth
-                  />
+                  <TextField value={sensorConfig[sensorKey].name} onChange={(e) => handleNameChange(sensorKey, e.target.value)} label="Name" variant="outlined" size="small" fullWidth />
                 </TableCell>
                 <TableCell>
-                  <TextField
-                    value={sensorConfig[sensorKey].factor}
-                    onChange={(e) => handleFactorChange(sensorKey, e.target.value)}
-                    label="Factor"
-                    variant="outlined"
-                    size="small"
-                    fullWidth
-                  />
+                  <TextField value={sensorConfig[sensorKey].function} onChange={(e) => handleFunctionChange(sensorKey, e.target.value)} label="Function" variant="outlined" size="small" fullWidth />
                 </TableCell>
                 <TableCell>
-                  {/* Color picker */}
                   <IconButton onClick={() => setColorPickerVisible(sensorKey)}>
-                    <div
-                      style={{
-                        width: '24px',
-                        height: '24px',
-                        backgroundColor: sensorConfig[sensorKey].color,
-                        borderRadius: '50%',
-                        border: '1px solid #ccc',
-                      }}
-                    />
+                    <div style={{ width: '24px', height: '24px', backgroundColor: sensorConfig[sensorKey].color, borderRadius: '50%', border: '1px solid #ccc' }} />
                   </IconButton>
                   {colorPickerVisible === sensorKey && (
-                    <SketchPicker
-                      color={sensorConfig[sensorKey].color}
-                      onChangeComplete={(color) => handleColorChange(sensorKey, color)}
-                    />
+                    <SketchPicker color={sensorConfig[sensorKey].color} onChangeComplete={(color) => handleColorChange(sensorKey, color)} />
                   )}
                 </TableCell>
                 <TableCell>
-                  <FormControlLabel
-                    control={<Checkbox checked={sensorConfig[sensorKey].selected} onChange={() => handleCheckboxChange(sensorKey)} />}
-                    label="Select"
-                  />
+                  <FormControlLabel control={<Checkbox checked={sensorConfig[sensorKey].selected} onChange={() => handleCheckboxChange(sensorKey)} />} label="Select" />
                 </TableCell>
               </TableRow>
             ))}
@@ -217,7 +214,6 @@ const DeviceDetails = () => {
         </Table>
       </TableContainer>
 
-      {/* Combined Graph */}
       <Box mb={3} p={2} style={{ borderRadius: '8px', boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.1)', maxWidth: '1000px', marginLeft: 'auto', marginRight: 'auto' }}>
         <Typography variant="h5" gutterBottom>
           Combined Graph
@@ -226,25 +222,17 @@ const DeviceDetails = () => {
           <LineChart data={combinedData}>
             {Object.keys(sensorConfig).map(sensorKey => (
               sensorConfig[sensorKey].selected && (
-                <Line
-                  key={sensorKey}
-                  type="monotone"
-                  dataKey={sensorKey}
-                  name={sensorConfig[sensorKey].name}
-                  stroke={sensorConfig[sensorKey].color}
-                  strokeWidth={3}
-                />
+                <Line key={sensorKey} type="monotone" dataKey={sensorKey} name={sensorConfig[sensorKey].name} stroke={sensorConfig[sensorKey].color} strokeWidth={3} />
               )
             ))}
             <CartesianGrid stroke="#ccc" />
-            <XAxis dataKey="received_at" tickFormatter={formatTime} />
+            <XAxis dataKey="received_at" tickFormatter={formatXAxis} />
             <YAxis />
             <Tooltip />
           </LineChart>
         </ResponsiveContainer>
       </Box>
 
-      {/* Individual Graphs with Two-Column Layout */}
       <Grid container spacing={3} justifyContent="center">
         {Object.keys(sensorConfig).map(sensorKey => (
           <Grid item xs={12} sm={6} key={sensorKey}>
@@ -256,13 +244,13 @@ const DeviceDetails = () => {
                 <LineChart data={deviceData}>
                   <Line
                     type="monotone"
-                    dataKey={(d) => applyTransform(d[sensorKey], sensorConfig[sensorKey].factor)}
+                    dataKey={(d) => applyTransform(d[sensorKey], sensorConfig[sensorKey].function)}
                     name={sensorConfig[sensorKey].name}
                     stroke={sensorConfig[sensorKey].color}
                     strokeWidth={3}
                   />
                   <CartesianGrid stroke="#ccc" />
-                  <XAxis dataKey="received_at" tickFormatter={formatTime} />
+                  <XAxis dataKey="received_at" tickFormatter={formatXAxis} />
                   <YAxis />
                   <Tooltip />
                 </LineChart>
